@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk.Web">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <!-- ship English resources only (packages otherwise add ~40 language folders) -->
+        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    </PropertyGroup>
+    <ItemGroup>
+        <!-- Microsoft.AspNetCore.App now comes from Sdk.Web; Razor.Design is no longer needed. -->
+        <!-- Logging uses ASP.NET's built-in ILogger, so NLog is no longer referenced. -->
+    </ItemGroup>
+    <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+        <!-- 'dotnet aspnet-codegenerator' scaffolding: a development tool only. Kept out of
+             Release builds so ~25 MB of compiler/NuGet libraries (including two NuGet
+             packages with a known low-severity advisory) don't ship in the container image. -->
+        <PackageReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="10.0.3" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- MySQL provider for Entity Framework Core 10 (Oracle's; Pomelo stops at EF Core 9): -->
+        <PackageReference Include="MySql.EntityFrameworkCore" Version="10.0.12" />
+        <!-- needed for 'dotnet ef migrations' and 'dotnet ef database update': -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" PrivateAssets="All" />
+        <!-- Redis cache (IDistributedCache), shared by all copies of the app: -->
+        <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.15" />
+        <!-- Data Protection keys in Redis, shared by all copies of the app: -->
+        <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.15" />
+        <!-- /healthz/ready checks that MySQL is reachable: -->
+        <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.15" />
+    </ItemGroup>
+    <!-- The scaffolding/EF command-line tools are now installed with 'dotnet tool install', not DotNetCliToolReference. -->
+</Project>

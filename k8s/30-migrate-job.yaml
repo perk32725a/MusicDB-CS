@@ -1,0 +1,41 @@
+# One-off: apply database migrations + seed data, then stop. compose's
+# 'migrate' service as a Kubernetes Job: the app's own image run with
+# '--migrate-only' (exit 0 = done, 1 = failed), so the app pods never race
+# to create tables.
+#
+# A finished Job can't be re-run in place. To migrate again (e.g. after a new
+# image with new migrations): kubectl -n musicdb delete job migrate, then
+# kubectl apply -f k8s/30-migrate-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: musicdb
+spec:
+  backoffLimit: 4                     # retry up to 4 times if it fails
+  template:
+    metadata:
+      labels: {app: migrate}
+    spec:
+      restartPolicy: Never
+      # Wait until MySQL accepts connections before migrating, instead of
+      # failing and retrying while it's still starting up.
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.37
+          command: ["sh", "-c", "until nc -z -w 2 mysql 3306; do echo waiting for mysql; sleep 3; done"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+      containers:
+        - name: migrate
+          image: docker.io/library/musicdb:dev   # imported into k3s on every node (step 2, part 2)
+          imagePullPolicy: IfNotPresent          # use that copy; there's no registry to pull from
+          args: ["--migrate-only"]               # added to the image's 'dotnet MusicDatabase.dll'
+          env:
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom: {secretKeyRef: {name: musicdb-db, key: ConnectionStrings__DefaultConnection}}
+            - {name: Logging__LogLevel__Microsoft.EntityFrameworkCore.Migrations, value: Information}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}

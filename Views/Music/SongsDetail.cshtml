@@ -1,0 +1,57 @@
+@model IEnumerable<MusicDatabase.Models.Songs>
+@* TODO: here we need a means of accessing MusicDatabase.Models.Music
+    as well as MusicDatabase.Models.Songs
+*@
+
+@{
+    ViewData["Title"] = "Views/Music/SongsDetail.cshtml";
+}
+
+<h2>@ViewData["Title"]</h2>
+<h1>@ViewData["Artist"]</h1>
+<h1>@ViewData["Album"]</h1>
+
+<p>
+    <a asp-action="Create">Create New</a>
+</p>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.AlbumArtistID)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.SongTitle)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.SongLength)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    @Html.DisplayFor(modelItem => item.AlbumArtistID) @* means of referencing table Music *@
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.SongTitle)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.SongLength)
+                </td>
+                @* don't need all this:
+                    <td>
+                        <a asp-action="Edit" asp-route-id="@item.ID">Edit</a> |
+                        <a asp-action="Details" asp-route-id="@item.ID">Details</a> |
+                        <a asp-action="Delete" asp-route-id="@item.ID">Delete</a>
+                    </td>
+                *@
+
+            </tr>
+        }
+    </tbody>
+</table>

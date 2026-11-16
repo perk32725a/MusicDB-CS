@@ -1,0 +1,36 @@
+@model MusicDatabase.Models.Songs
+
+@{
+    ViewData["Title"] = "Views/Songs/Details.cshtml";
+}
+
+<h2>@ViewData["Title"]</h2>
+
+<div>
+    <h4>Songs Table</h4>
+    <hr />
+    <dl class="dl-horizontal">
+        <dt>
+            @Html.DisplayNameFor(model => model.AlbumArtistID)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.AlbumArtistID)
+        </dd>
+        <dt>
+            @Html.DisplayNameFor(model => model.SongTitle)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.SongTitle)
+        </dd>
+        <dt>
+            @Html.DisplayNameFor(model => model.SongLength)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.SongLength)
+        </dd>
+    </dl>
+</div>
+<div>
+    <a asp-action="Edit" asp-route-id="@Model.ID">Edit</a> |
+    <a asp-action="Index">Back to List</a>
+</div>

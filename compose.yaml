@@ -1,0 +1,104 @@
+# MusicDB-CS with MySQL and Redis, all as containers: two copies of the app
+# behind HAProxy.
+#   start:   docker compose up -d --build   (site at http://localhost:8080)
+#   stats:   http://localhost:8404          (HAProxy: which copies are up, traffic per copy)
+#   copies:  docker compose up -d --scale app=3   (1 to 4; default 2, or APP_REPLICAS in .env)
+#   status:  docker compose ps        (wait for "healthy")
+#   app log: docker compose logs -f app       (all copies; each line starts with app-1, app-2...)
+#   migrate: docker compose run --rm migrate   (apply new migrations without restarting the app)
+#   shell:   docker compose exec mysql sh -c 'mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"'
+#   cache:   docker compose exec redis redis-cli monitor   (watch cache reads/writes live)
+#   stop:    docker compose down      (data is kept in the musicdb-data volume)
+#   wipe:    docker compose down -v   (deletes the data too)
+# Only MySQL and Redis (to run the app with 'dotnet run'): docker compose up -d mysql redis
+# Passwords come from .env, which is not committed (see .env.example).
+
+services:
+  mysql:
+    image: mysql:8.4                  # current MySQL LTS; has an ARM64 image
+    container_name: musicdb-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: MusicDB
+      MYSQL_USER: musicdb
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:3306:3306"         # reachable from this Mac only
+    volumes:
+      - musicdb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8
+    container_name: musicdb-redis
+    restart: unless-stopped
+    # a cache only: no saving to disk; cap memory, and when full evict only keys
+    # that have an expiry (cached pages), never the cache-version key
+    command: ["redis-server", "--save", "", "--appendonly", "no",
+              "--maxmemory", "128mb", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"         # reachable from this Mac only
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # one-off: apply database migrations + seed data, then exit. Runs before
+  # the app starts, so copies of the app never race to create tables.
+  # (In Kubernetes this becomes a Job running the same image and argument.)
+  migrate:
+    build: .
+    image: musicdb:dev
+    command: ["--migrate-only"]       # added to the image's 'dotnet MusicDatabase.dll'
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: "server=mysql;port=3306;database=MusicDB;user=musicdb;password=${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}"
+      Logging__LogLevel__Microsoft.EntityFrameworkCore.Migrations: Information   # show "Applying migration ..."
+
+  app:
+    build: .
+    image: musicdb:dev
+    restart: unless-stopped
+    deploy:
+      replicas: ${APP_REPLICAS:-2}    # copies of the app behind HAProxy (haproxy.cfg allows up to 4)
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:                        # start only after migrations succeeded
+        condition: service_completed_successfully
+    environment:
+      # services reach each other by service name on compose's network
+      ConnectionStrings__DefaultConnection: "server=mysql;port=3306;database=MusicDB;user=musicdb;password=${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}"
+      ConnectionStrings__Redis: "redis:6379,abortConnect=false,connectTimeout=2000,syncTimeout=1000,asyncTimeout=1000"
+      Database__MigrateOnStartup: "false"       # the migrate service does it
+      ReverseProxy__Enabled: "true"             # trust HAProxy's X-Forwarded-* headers
+      Logging__LogLevel__MusicDatabase: Debug   # show cache hits/misses locally
+    # no host port: only HAProxy publishes one, so several copies don't clash
+    volumes:
+      # the music library, read-only; set MUSIC_DIR in .env to use another folder
+      - "${MUSIC_DIR:-~/Music/iTunes/iTunes Media/Music}:/music:ro"
+
+  haproxy:
+    image: haproxy:3.2                # current HAProxy LTS
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "127.0.0.1:8080:8080"         # the site (reachable from this Mac only)
+      - "127.0.0.1:8404:8404"         # HAProxy stats page
+
+volumes:
+  musicdb-data:

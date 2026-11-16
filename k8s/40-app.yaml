@@ -1,0 +1,107 @@
+# The music database web app: compose's 'app' service (2 copies) in Kubernetes.
+# Needs: the 'musicdb-db' Secret (make-secrets.sh), MySQL + Redis + a finished
+# migrate Job (10-, 20-, 30-*.yaml), and the image musicdb:dev imported on
+# every node (lab-plan.md, step 2 part 2).
+---
+# Settings that aren't secret (the MySQL connection string, which contains the
+# password, comes from the Secret instead). Same names as compose's settings.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: musicdb-config
+  namespace: musicdb
+data:
+  ConnectionStrings__Redis: "redis:6379,abortConnect=false,connectTimeout=2000,syncTimeout=1000,asyncTimeout=1000"
+  ReverseProxy__Enabled: "true"           # trust HAProxy's X-Forwarded-* headers
+  Database__MigrateOnStartup: "false"     # the migrate Job does it, once
+  MusicLibrary__Path: /music
+  Logging__LogLevel__MusicDatabase: Information   # Debug shows cache hits/misses
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: musicdb
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: musicdb-app}
+  # Update one copy at a time and never go below 2 ready copies, so a new
+  # image rolls out with no downtime.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels: {app: musicdb-app}
+    spec:
+      securityContext:
+        runAsNonRoot: true                # the image runs as its 'app' user (uid 1654)
+      # Keep the copies on different nodes where possible, so losing one node
+      # never takes both ("ScheduleAnyway": still run if only one node is free).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: musicdb-app}
+      containers:
+        - name: app
+          image: docker.io/library/musicdb:dev   # imported on every node; no registry
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef: {name: musicdb-config}
+          env:
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom: {secretKeyRef: {name: musicdb-db, key: ConnectionStrings__DefaultConnection}}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          # 'started' = the web server answers (allows up to 60 s).
+          startupProbe:
+            httpGet: {path: /healthz/live, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          # 'alive' = still answering; restarted after 3 misses in a row.
+          livenessProbe:
+            httpGet: {path: /healthz/live, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          # 'ready' = can reach MySQL; until then it gets no traffic
+          # (it drops out of the app-pods DNS name, and HAProxy's own check fails).
+          readinessProbe:
+            httpGet: {path: /healthz/ready, port: http}
+            periodSeconds: 5
+            failureThreshold: 2
+          volumeMounts:
+            - name: music
+              mountPath: /music
+              readOnly: true
+      # The music library for Refresh: one shared CephFS volume (claim 'music',
+      # 15-music.yaml), mounted read-only by every copy on whatever node it
+      # runs. Filled with k8s/music-load.sh. (Until 2026-11-15 this was a
+      # hostPath folder, /srv/music, copied onto each node.)
+      volumes:
+        - name: music
+          persistentVolumeClaim:
+            claimName: music
+            readOnly: true
+---
+# Headless Service (no virtual IP): its DNS name returns each ready app pod's
+# own address, so HAProxy sees, health-checks and balances every copy
+# separately, as with Docker's DNS in compose. A normal Service would give
+# HAProxy a single virtual address that hides the copies behind it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-pods
+  namespace: musicdb
+spec:
+  clusterIP: None
+  selector: {app: musicdb-app}
+  ports:
+    - name: http
+      port: 8080

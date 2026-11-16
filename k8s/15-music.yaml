@@ -1,0 +1,15 @@
+# The music library for the app's Refresh: one shared CephFS folder that every
+# app copy mounts (read-only) at /music, whichever node it runs on.
+# StorageClass 'cephfs' comes from the lab repo homelab-kvm-ceph-k8s.
+# Fill it with k8s/music-load.sh. (Until 2026-11-15 each node had its own
+# copy in /srv/music, mounted with hostPath.)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: music
+  namespace: musicdb
+spec:
+  storageClassName: cephfs
+  accessModes: [ReadWriteMany]        # many pods, on different nodes, at once
+  resources:
+    requests: {storage: 1Gi}          # enforced by Ceph as a quota on the folder

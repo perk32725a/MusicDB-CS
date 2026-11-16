@@ -1,0 +1,45 @@
+@model IEnumerable<MusicDatabase.Models.Songs>
+@* TODO: here we need a means of accessing MusicDatabase.Models.Music
+    as well as MusicDatabase.Models.Songs
+*@
+
+@{
+    ViewData["Title"] = "Views/Music/SongsDetail.cshtml";
+}
+
+<h2>@ViewData["Artist"]</h2>
+<h2>@ViewData["Album"]</h2>
+<h3>(from @ViewData["Title"])</h3>
+
+<p>
+    <a asp-action="Create">Create New</a>
+</p>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.SongTitle)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.SongLength)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>
+                    @Html.DisplayFor(modelItem => item.SongTitle)
+                </td>
+                <td>
+                    @Html.DisplayFor(modelItem => item.SongLength)
+                </td>
+            </tr>
+        }
+    </tbody>
+
+</table>

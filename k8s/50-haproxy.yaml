@@ -1,0 +1,119 @@
+# HAProxy in front of the app copies: compose's 'haproxy' service in Kubernetes.
+#   site:  http://node1:8080   stats: http://node1:8404   (node2/node3 work too)
+# After changing haproxy.cfg below, restart HAProxy to load it:
+#   kubectl -n musicdb rollout restart deployment haproxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: haproxy-config
+  namespace: musicdb
+data:
+  # Same as haproxy/haproxy.cfg (compose), except for the resolvers section
+  # and the server-template name: the cluster's DNS and the headless Service
+  # 'app-pods' replace Docker's DNS and the 'app' service name.
+  haproxy.cfg: |
+    global
+        log stdout format raw local0
+
+    defaults
+        mode http
+        log global
+        option httplog
+        option redispatch          # if a copy fails mid-request, retry on another
+        retries 3
+        timeout connect 5s
+        timeout client  30s
+        timeout server  60s        # Refresh of a large library can take a few seconds
+
+    # The cluster's DNS (CoreDNS), read from the pod's /etc/resolv.conf.
+    resolvers k8s
+        parse-resolv-conf
+        resolve_retries 3
+        timeout resolve 1s
+        hold valid 5s              # re-check often, so new/removed pods are noticed quickly
+        # If DNS itself fails (times out, refuses, errors), keep using the last
+        # known addresses and let the health checks decide which copies are up.
+        # Without this, HAProxy dropped *healthy* servers 30 s into a DNS outage:
+        # seen 2026-11-15 when node2 was powered off, because kube-proxy pins
+        # HAProxy's DNS traffic (one UDP socket) to a single CoreDNS copy, here
+        # the dead one on node2, until the node is marked NotReady (21 s of 503s).
+        # A real answer ("no such pod") is still acted on within 5 s.
+        hold timeout 300s
+        hold refused 300s
+        hold other   300s
+
+    frontend web
+        bind :8080
+        option forwardfor
+        http-request set-header X-Forwarded-Proto http
+        default_backend app
+
+    backend app
+        # round robin, deliberately WITHOUT sticky sessions: any request can go
+        # to any copy, which is what proves the shared Data Protection keys work
+        balance roundrobin
+        # which copy answered: HAProxy's slot name (app1, app2...); the stats
+        # page shows which pod address each slot currently holds
+        http-response set-header X-Served-By %[srv_name]
+        option httpchk GET /healthz/ready
+        http-check expect status 200
+        default-server check inter 2s fall 2 rise 2
+        # up to 4 copies, found through the headless Service; unused slots show as MAINT
+        server-template app 4 app-pods.musicdb.svc.cluster.local:8080 resolvers k8s init-addr none
+
+    frontend stats
+        bind :8404
+        stats enable
+        stats uri /
+        stats refresh 5s
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: haproxy
+  namespace: musicdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: haproxy}
+  template:
+    metadata:
+      labels: {app: haproxy}
+    spec:
+      containers:
+        - name: haproxy
+          image: haproxy:3.2                     # current HAProxy LTS; runs as non-root user 'haproxy'
+          ports:
+            - {name: web, containerPort: 8080}
+            - {name: stats, containerPort: 8404}
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          readinessProbe:
+            httpGet: {path: /, port: stats}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /, port: stats}
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/haproxy   # haproxy.cfg from the ConfigMap
+              readOnly: true
+      volumes:
+        - name: config
+          configMap: {name: haproxy-config}
+---
+# Reachable from the Mac: k3s's built-in ServiceLB opens these ports on every
+# node's address (possible because Traefik, which would hold ports, is disabled).
+apiVersion: v1
+kind: Service
+metadata:
+  name: haproxy
+  namespace: musicdb
+spec:
+  type: LoadBalancer
+  selector: {app: haproxy}
+  ports:
+    - {name: web, port: 8080, targetPort: web}
+    - {name: stats, port: 8404, targetPort: stats}

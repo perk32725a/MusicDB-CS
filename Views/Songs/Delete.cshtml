@@ -1,0 +1,39 @@
+@model MusicDatabase.Models.Songs
+
+@{
+    ViewData["Title"] = "Views/Songs/Delete.cshtml";
+}
+
+<h2>@ViewData["Title"]</h2>
+
+<h3>Are you sure you want to delete this?</h3>
+<div>
+    <h4>Songs Table</h4>
+    <hr />
+    <dl class="dl-horizontal">
+        <dt>
+            @Html.DisplayNameFor(model => model.AlbumArtistID)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.AlbumArtistID)
+        </dd>
+        <dt>
+            @Html.DisplayNameFor(model => model.SongTitle)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.SongTitle)
+        </dd>
+        <dt>
+            @Html.DisplayNameFor(model => model.SongLength)
+        </dt>
+        <dd>
+            @Html.DisplayFor(model => model.SongLength)
+        </dd>
+    </dl>
+    
+    <form asp-action="Delete">
+        <input type="hidden" asp-for="ID" />
+        <input type="submit" value="Delete" class="btn btn-default" /> |
+        <a asp-action="Index">Back to List</a>
+    </form>
+</div>
